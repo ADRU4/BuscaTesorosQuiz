@@ -1,56 +1,36 @@
-# Welcome to your Expo app 👋
+# App Busca el Tesoro - React Native Expo
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+Este proyecto es un mini-juego de búsqueda de tesoros utilizando geolocalización en tiempo real.
 
-## Get started
+## Requisitos Previos
+- Node.js instalado.
+- Expo Go en tu dispositivo móvil (iOS o Android) para probar la geolocalización real.
 
-1. Install dependencies
+## Instalación
 
+1. Instala las dependencias necesarias:
    ```bash
-   npm install
+   npm install expo-sqlite expo-location react-native-maps
    ```
 
-2. Start the app
-
+2. Inicia el proyecto:
    ```bash
    npx expo start
    ```
 
-In the output, you'll find options to open the app in a
+## Estructura del Proyecto
+- `src/database/database.js`: Configuración de SQLite y funciones CRUD.
+- `src/utils/geoUtils.js`: Funciones para cálculo de distancia (Haversine) y generación de coordenadas.
+- `src/components/TreasureHunt.js`: Componente principal con la lógica del juego y el mapa.
+- `src/app/index.tsx`: Punto de entrada de la aplicación.
 
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
+## Características
+- **Geolocalización Real**: Rastreo de la posición del usuario en tiempo real.
+- **Persistencia**: Los tesoros se guardan localmente en una base de datos SQLite.
+- **Lógica de Proximidad**: El juego detecta automáticamente cuando estás a menos de 30 metros del tesoro activo.
+- **Visualización**: Solo se muestra en el mapa el tesoro más cercano que aún no ha sido encontrado.
 
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
-
-```bash
-npm run reset-project
-```
-
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
-
-### Other setup steps
-
-- To set up ESLint for linting, run `npx expo lint`, or follow our guide on ["Using ESLint and Prettier"](https://docs.expo.dev/guides/using-eslint/)
-- If you'd like to set up unit testing, follow our guide on ["Unit Testing with Jest"](https://docs.expo.dev/develop/unit-testing/)
-- Learn more about the TypeScript setup in this template in our guide on ["Using TypeScript"](https://docs.expo.dev/guides/typescript/)
-
-## Learn more
-
-To learn more about developing your project with Expo, look at the following resources:
-
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
-
-## Join the community
-
-Join our community of developers creating universal apps.
-
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+## Notas de Desarrollo
+- La aplicación solicita permisos de ubicación al inicio.
+- Se generan 3 tesoros aleatorios dentro de un radio de 200m de la ubicación inicial si la base de datos está vacía.
+- La distancia se calcula usando la fórmula de Haversine para mayor precisión.
