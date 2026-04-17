@@ -4,7 +4,8 @@ import MapView, { Marker } from 'react-native-maps';
 import * as Location from 'expo-location';
 import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
-import { initDatabase, saveTreasures, getTreasures, markAsFound } from '../database/database';
+import { TouchableOpacity } from 'react-native';
+import { initDatabase, saveTreasures, getTreasures, markAsFound, updateTreasureLocation } from '../database/database';
 import { getDistance, generateRandomCoordinates } from '../utils/geoUtils';
 
 // Configuración de notificaciones
@@ -227,6 +228,37 @@ export default function TreasureHunt() {
     updateActiveTreasure(updatedTreasures, location);
   };
 
+  const handleRelocateTreasure = async () => {
+    if (!db || !activeTreasure || !location) return;
+
+    try {
+      // 1. Generar nueva coordenada aleatoria (radio 100m según requisito)
+      const [newCoords] = generateRandomCoordinates(
+        location.latitude,
+        location.longitude,
+        100
+      );
+
+      // 2. Actualizar en SQLite
+      await updateTreasureLocation(
+        db,
+        activeTreasure.id,
+        newCoords.latitude,
+        newCoords.longitude
+      );
+
+      // 3. Actualizar estado local para refrescar UI
+      const updatedTreasures = await getTreasures(db);
+      setTreasures(updatedTreasures);
+      updateActiveTreasure(updatedTreasures, location);
+
+      Alert.alert('Tesoro reubicado', 'El tesoro ha aparecido en una nueva ubicación cercana.');
+    } catch (error) {
+      console.error('Error al reubicar:', error);
+      Alert.alert('Error', 'No se pudo reubicar el tesoro.');
+    }
+  };
+
   const foundCount = treasures.filter(t => t.encontrado === 1).length;
 
   if (loading) {
@@ -286,6 +318,15 @@ export default function TreasureHunt() {
               Estás a {getDistance(location.latitude, location.longitude, activeTreasure.latitude, activeTreasure.longitude).toFixed(0)}m
             </Text>
           )}
+          
+          {activeTreasure && (
+            <TouchableOpacity 
+              style={styles.relocateButton} 
+              onPress={handleRelocateTreasure}
+            >
+              <Text style={styles.relocateButtonText}>Reubicar tesoro</Text>
+            </TouchableOpacity>
+          )}
         </View>
       </View>
     </View>
@@ -321,5 +362,18 @@ const styles = StyleSheet.create({
   },
   markerCapturable: { borderColor: '#4CAF50', backgroundColor: '#E8F5E9' },
   markerEmoji: { fontSize: 20 },
+  relocateButton: {
+    backgroundColor: '#007AFF',
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 12,
+    marginTop: 15,
+    alignSelf: 'center',
+  },
+  relocateButtonText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
   errorText: { color: 'red', fontSize: 16, textAlign: 'center' },
 });

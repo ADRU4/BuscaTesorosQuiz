@@ -34,6 +34,13 @@ export const markAsFound = async (db, id) => {
   await db.runAsync('UPDATE treasures SET encontrado = 1 WHERE id = ?', [id]);
 };
 
+export const updateTreasureLocation = async (db, id, latitude, longitude) => {
+  await db.runAsync(
+    'UPDATE treasures SET latitude = ?, longitude = ? WHERE id = ?',
+    [latitude, longitude, id]
+  );
+};
+
 export const resetGame = async (db) => {
   await db.runAsync('DELETE FROM treasures');
 };
