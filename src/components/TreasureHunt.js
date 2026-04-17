@@ -14,11 +14,11 @@ import {
     View
 } from 'react-native';
 import MapView, { Marker } from 'react-native-maps';
-import { getTreasures, initDatabase, markAsFound, resetGame, saveTreasures, updateTreasureLocation } from '../database/database';
+import { getFoundCount, getNearestActiveTreasure, getTreasures, initDatabase, markTreasureAsFound, resetGame, seedTreasuresIfEmpty, updateTreasureLocation } from '../database/database';
 import { generateRandomCoordinates, getDistance } from '../utils/geoUtils';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const TOTAL_TREASURES = 5;
+const TOTAL_TREASURES = 3;
 const CAPTURE_RADIUS = 30;
 
 const DIFFICULTIES = {
@@ -219,7 +219,7 @@ export default function TreasureHunt() {
 
   // Progress bar animation
   useEffect(() => {
-    const foundCount = treasures.filter(t => t.encontrado === 1).length;
+    const foundCount = treasures.filter(t => t.found === 1).length;
     Animated.spring(progressAnim, {
       toValue: foundCount / TOTAL_TREASURES,
       friction: 8,
@@ -270,13 +270,23 @@ export default function TreasureHunt() {
       let initialLocation = await Location.getCurrentPositionAsync({});
       setLocation(initialLocation.coords);
 
-      let savedTreasures = await getTreasures(database);
+      const savedTreasures = await getTreasures();
 
       if (savedTreasures.length === 0) {
         setShowDifficultyModal(true);
       } else {
         setTreasures(savedTreasures);
-        updateActiveTreasure(savedTreasures, initialLocation.coords);
+        const count = await getFoundCount();
+        if (count < TOTAL_TREASURES) {
+          const nearest = await getNearestActiveTreasure(initialLocation.coords.latitude, initialLocation.coords.longitude);
+          if (nearest) {
+            setActiveTreasure(nearest);
+            setStatusMsg(nearest.distance < CAPTURE_RADIUS ? '¡Toca el tesoro para capturarlo!' : 'Sigue el mapa hacia el tesoro...');
+          }
+        } else {
+          setGameCompleted(true);
+          setStatusMsg('Has encontrado todos los tesoros');
+        }
       }
 
       startWatchingLocation();
@@ -298,16 +308,15 @@ export default function TreasureHunt() {
       setIsTimerActive(true);
     }
 
-    const newTreasures = generateRandomCoordinates(
-      location.latitude,
-      location.longitude,
-      diff.radius,
-      TOTAL_TREASURES
-    );
-    await saveTreasures(db, newTreasures);
-    const savedTreasures = await getTreasures(db);
+    await seedTreasuresIfEmpty(location.latitude, location.longitude);
+    const savedTreasures = await getTreasures();
     setTreasures(savedTreasures);
-    updateActiveTreasure(savedTreasures, location);
+
+    const nearest = await getNearestActiveTreasure(location.latitude, location.longitude);
+    if (nearest) {
+      setActiveTreasure(nearest);
+      setStatusMsg('Sigue el mapa hacia el tesoro...');
+    }
 
     Alert.alert('Dificultad seleccionada', `Has elegido el modo ${diff.label}.`);
   };
@@ -321,43 +330,6 @@ export default function TreasureHunt() {
         checkProximity(coords);
       }
     );
-  };
-
-  const updateActiveTreasure = (allTreasures, currentCoords) => {
-    const pending = allTreasures.filter(t => t.encontrado === 0);
-
-    if (pending.length === 0) {
-      setActiveTreasure(null);
-      setIsCapturable(false);
-      setGameCompleted(true);
-      setIsTimerActive(false);
-      setStatusMsg('Has encontrado todos los tesoros');
-      return;
-    }
-
-    setGameCompleted(false);
-    let closest = pending[0];
-    let minDistance = getDistance(
-      currentCoords.latitude, currentCoords.longitude,
-      closest.latitude, closest.longitude
-    );
-
-    pending.forEach(t => {
-      const dist = getDistance(
-        currentCoords.latitude, currentCoords.longitude,
-        t.latitude, t.longitude
-      );
-      if (dist < minDistance) {
-        minDistance = dist;
-        closest = t;
-      }
-    });
-
-    setActiveTreasure(closest);
-
-    const capturable = minDistance < CAPTURE_RADIUS;
-    setIsCapturable(capturable);
-    setStatusMsg(capturable ? '¡Toca el tesoro para capturarlo!' : 'Sigue el mapa hacia el tesoro...');
   };
 
   const checkProximity = (coords) => {
@@ -469,14 +441,17 @@ export default function TreasureHunt() {
     Vibration.vibrate([0, 100, 50, 100, 50, 200]);
     playCaptureAnimation();
 
-    await markAsFound(db, id);
-    const updatedTreasures = await getTreasures(db);
+    await markTreasureAsFound(id);
+    const updatedTreasures = await getTreasures();
     setTreasures(updatedTreasures);
 
-    const found = updatedTreasures.filter(t => t.encontrado === 1).length;
+    const found = await getFoundCount();
 
     if (found === TOTAL_TREASURES) {
       setIsTimerActive(false);
+      setActiveTreasure(null);
+      setGameCompleted(true);
+      setStatusMsg('Has encontrado todos los tesoros');
       setTimeout(() => {
         Alert.alert(
           '🏆 ¡Felicidades!',
@@ -484,9 +459,13 @@ export default function TreasureHunt() {
           [{ text: '¡Genial!' }]
         );
       }, 1200);
+    } else {
+      const nearest = await getNearestActiveTreasure(location.latitude, location.longitude);
+      if (nearest) {
+        setActiveTreasure(nearest);
+        setStatusMsg('Sigue el mapa hacia el tesoro...');
+      }
     }
-
-    updateActiveTreasure(updatedTreasures, location);
   };
 
   const handleRelocateTreasure = async () => {
@@ -497,10 +476,14 @@ export default function TreasureHunt() {
         location.latitude, location.longitude, 100, 1
       );
 
-      await updateTreasureLocation(db, activeTreasure.id, newCoords.latitude, newCoords.longitude);
-      const updatedTreasures = await getTreasures(db);
+      await updateTreasureLocation(activeTreasure.id, newCoords.latitude, newCoords.longitude);
+      const updatedTreasures = await getTreasures();
       setTreasures(updatedTreasures);
-      updateActiveTreasure(updatedTreasures, location);
+      const nearest = await getNearestActiveTreasure(location.latitude, location.longitude);
+      if (nearest) {
+        setActiveTreasure(nearest);
+        setStatusMsg('Sigue el mapa hacia el tesoro...');
+      }
 
       Alert.alert('Tesoro reubicado', 'El tesoro apareció en una nueva ubicación.');
     } catch (error) {
@@ -520,7 +503,7 @@ export default function TreasureHunt() {
         {
           text: 'Empezar',
           onPress: async () => {
-            await resetGame(db);
+            await resetGame();
             setTreasures([]);
             setGameCompleted(false);
             notifiedTreasureId.current = null;
@@ -534,7 +517,7 @@ export default function TreasureHunt() {
     );
   };
 
-  const foundCount = treasures.filter(t => t.encontrado === 1).length;
+  const foundCount = treasures.filter(t => t.found === 1).length;
 
   const getTreasureType = (index) => TREASURE_TYPES[index % TREASURE_TYPES.length];
 
@@ -699,14 +682,14 @@ export default function TreasureHunt() {
                   key={t.id}
                   style={[
                     styles.dot,
-                    t.encontrado === 1
+                    t.found === 1
                       ? { backgroundColor: type.border }
                       : { backgroundColor: '#E0E0E0' },
-                    activeTreasure?.id === t.id && t.encontrado === 0 && styles.dotActive,
+                    activeTreasure?.id === t.id && t.found === 0 && styles.dotActive,
                   ]}
                 >
                   <Text style={styles.dotEmoji}>
-                    {t.encontrado === 1 ? '✓' : type.emoji}
+                    {t.found === 1 ? '✓' : type.emoji}
                   </Text>
                 </View>
               );
@@ -733,7 +716,7 @@ export default function TreasureHunt() {
             />
           </View>
           <Text style={styles.progressText}>
-            {foundCount} de {TOTAL_TREASURES} tesoros encontrados
+            Tesoros encontrados: {foundCount}/{TOTAL_TREASURES}
           </Text>
 
           {/* Timer for Hard mode */}
