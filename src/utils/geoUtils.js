@@ -19,10 +19,10 @@ export const getDistance = (lat1, lon1, lat2, lon2) => {
 /**
  * Genera coordenadas aleatorias dentro de un radio aproximado en metros.
  */
-export const generateRandomCoordinates = (centerLat, centerLon, radiusInMeters = 50) => {
+export const generateRandomCoordinates = (centerLat, centerLon, radiusInMeters = 50, count = 5) => {
   const treasures = [];
-  
-  for (let i = 0; i < 3; i++) {
+
+  for (let i = 0; i < count; i++) {
     // 1 grado de latitud ~ 111,320 metros
     // 1 grado de longitud ~ 111,320 * cos(lat) metros
     const r = radiusInMeters / 111320;
