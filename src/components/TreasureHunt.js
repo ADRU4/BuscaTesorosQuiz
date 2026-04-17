@@ -1,18 +1,31 @@
-import React, { useState, useEffect, useRef } from 'react';
-import {
-  StyleSheet, Text, View, ActivityIndicator, Alert, Vibration,
-  TouchableOpacity, Animated, Easing, Dimensions,
-} from 'react-native';
-import MapView, { Marker } from 'react-native-maps';
+import Constants from 'expo-constants';
 import * as Location from 'expo-location';
 import * as Notifications from 'expo-notifications';
-import Constants from 'expo-constants';
-import { initDatabase, saveTreasures, getTreasures, markAsFound, updateTreasureLocation, resetGame } from '../database/database';
-import { getDistance, generateRandomCoordinates } from '../utils/geoUtils';
+import React, { useEffect, useRef, useState } from 'react';
+import {
+    ActivityIndicator, Alert,
+    Animated,
+    Dimensions,
+    Easing,
+    Modal,
+    StyleSheet, Text,
+    TouchableOpacity,
+    Vibration,
+    View
+} from 'react-native';
+import MapView, { Marker } from 'react-native-maps';
+import { getTreasures, initDatabase, markAsFound, resetGame, saveTreasures, updateTreasureLocation } from '../database/database';
+import { generateRandomCoordinates, getDistance } from '../utils/geoUtils';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const TOTAL_TREASURES = 5;
 const CAPTURE_RADIUS = 30;
+
+const DIFFICULTIES = {
+  facil: { label: 'Fácil', radius: 100, timer: null, color: '#4CAF50' },
+  normal: { label: 'Normal', radius: 1000, timer: null, color: '#2196F3' },
+  dificil: { label: 'Difícil', radius: 2000, timer: 180, color: '#F44336' },
+};
 
 const TREASURE_TYPES = [
   { emoji: '💎', name: 'Diamante', color: '#E3F2FD', border: '#42A5F5' },
@@ -110,9 +123,38 @@ export default function TreasureHunt() {
   const [showParticles, setShowParticles] = useState(false);
   const [lastCapturedType, setLastCapturedType] = useState(null);
   const [gameCompleted, setGameCompleted] = useState(false);
+  const [difficulty, setDifficulty] = useState(null);
+  const [showDifficultyModal, setShowDifficultyModal] = useState(false);
+  const [timeLeft, setTimeLeft] = useState(0);
+  const [isTimerActive, setIsTimerActive] = useState(false);
 
   const locationSubscription = useRef(null);
   const notifiedTreasureId = useRef(null);
+  const timerRef = useRef(null);
+
+  // Timer logic for Hard difficulty
+  useEffect(() => {
+    if (isTimerActive && timeLeft > 0) {
+      timerRef.current = setInterval(() => {
+        setTimeLeft((prev) => prev - 1);
+      }, 1000);
+    } else if (timeLeft === 0 && isTimerActive) {
+      handleGameOver();
+    }
+
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, [isTimerActive, timeLeft]);
+
+  const handleGameOver = () => {
+    setIsTimerActive(false);
+    Alert.alert(
+      '⌛ ¡Tiempo agotado!',
+      'No lograste encontrar todos los tesoros a tiempo. ¡Inténtalo de nuevo!',
+      [{ text: 'Reiniciar', onPress: () => handleResetGame() }]
+    );
+  };
 
   // Animations
   const pulseAnim = useRef(new Animated.Value(1)).current;
@@ -231,18 +273,11 @@ export default function TreasureHunt() {
       let savedTreasures = await getTreasures(database);
 
       if (savedTreasures.length === 0) {
-        const newTreasures = generateRandomCoordinates(
-          initialLocation.coords.latitude,
-          initialLocation.coords.longitude,
-          50,
-          TOTAL_TREASURES
-        );
-        await saveTreasures(database, newTreasures);
-        savedTreasures = await getTreasures(database);
+        setShowDifficultyModal(true);
+      } else {
+        setTreasures(savedTreasures);
+        updateActiveTreasure(savedTreasures, initialLocation.coords);
       }
-
-      setTreasures(savedTreasures);
-      updateActiveTreasure(savedTreasures, initialLocation.coords);
 
       startWatchingLocation();
       setLoading(false);
@@ -251,6 +286,30 @@ export default function TreasureHunt() {
       setErrorMsg('Error al iniciar el juego');
       setLoading(false);
     }
+  };
+
+  const handleStartWithDifficulty = async (diffKey) => {
+    const diff = DIFFICULTIES[diffKey];
+    setDifficulty(diffKey);
+    setShowDifficultyModal(false);
+
+    if (diff.timer) {
+      setTimeLeft(diff.timer);
+      setIsTimerActive(true);
+    }
+
+    const newTreasures = generateRandomCoordinates(
+      location.latitude,
+      location.longitude,
+      diff.radius,
+      TOTAL_TREASURES
+    );
+    await saveTreasures(db, newTreasures);
+    const savedTreasures = await getTreasures(db);
+    setTreasures(savedTreasures);
+    updateActiveTreasure(savedTreasures, location);
+
+    Alert.alert('Dificultad seleccionada', `Has elegido el modo ${diff.label}.`);
   };
 
   const startWatchingLocation = async () => {
@@ -271,6 +330,7 @@ export default function TreasureHunt() {
       setActiveTreasure(null);
       setIsCapturable(false);
       setGameCompleted(true);
+      setIsTimerActive(false);
       setStatusMsg('Has encontrado todos los tesoros');
       return;
     }
@@ -416,6 +476,7 @@ export default function TreasureHunt() {
     const found = updatedTreasures.filter(t => t.encontrado === 1).length;
 
     if (found === TOTAL_TREASURES) {
+      setIsTimerActive(false);
       setTimeout(() => {
         Alert.alert(
           '🏆 ¡Felicidades!',
@@ -460,15 +521,13 @@ export default function TreasureHunt() {
           text: 'Empezar',
           onPress: async () => {
             await resetGame(db);
-            const newTreasures = generateRandomCoordinates(
-              location.latitude, location.longitude, 50, TOTAL_TREASURES
-            );
-            await saveTreasures(db, newTreasures);
-            const savedTreasures = await getTreasures(db);
-            setTreasures(savedTreasures);
+            setTreasures([]);
             setGameCompleted(false);
             notifiedTreasureId.current = null;
-            updateActiveTreasure(savedTreasures, location);
+            setIsTimerActive(false);
+            setTimeLeft(0);
+            setDifficulty(null);
+            setShowDifficultyModal(true);
           },
         },
       ]
@@ -546,6 +605,34 @@ export default function TreasureHunt() {
 
   return (
     <View style={styles.container}>
+      <Modal visible={showDifficultyModal} transparent animationType="slide">
+        <View style={styles.modalContainer}>
+          <View style={styles.difficultyCard}>
+            <Text style={styles.modalTitle}>Elige la Dificultad</Text>
+            <Text style={styles.modalSubtitle}>¿Qué tan lejos quieres buscar?</Text>
+
+            {Object.keys(DIFFICULTIES).map((key) => {
+              const diff = DIFFICULTIES[key];
+              return (
+                <TouchableOpacity
+                  key={key}
+                  style={[styles.difficultyButton, { borderColor: diff.color }]}
+                  onPress={() => handleStartWithDifficulty(key)}
+                >
+                  <Text style={[styles.difficultyButtonText, { color: diff.color }]}>
+                    {diff.label}
+                  </Text>
+                  <Text style={styles.difficultyDescription}>
+                    {key === 'facil' ? 'Cerca de ti (<100m)' : 'En cualquier lugar'}
+                    {diff.timer ? ` • ${diff.timer / 60} min` : ''}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </View>
+      </Modal>
+
       <MapView
         style={styles.map}
         initialRegion={{
@@ -596,7 +683,14 @@ export default function TreasureHunt() {
       {/* Header with treasure counter dots */}
       <View style={styles.headerOverlay}>
         <View style={styles.headerCard}>
-          <Text style={styles.headerTitle}>🗺️ Busca Tesoros</Text>
+          <View style={styles.headerTopRow}>
+            <Text style={styles.headerTitle}>🗺️ Busca Tesoros</Text>
+            {difficulty && (
+              <View style={[styles.difficultyBadge, { backgroundColor: DIFFICULTIES[difficulty].color }]}>
+                <Text style={styles.difficultyBadgeText}>{DIFFICULTIES[difficulty].label}</Text>
+              </View>
+            )}
+          </View>
           <View style={styles.dotsRow}>
             {treasures.map((t, i) => {
               const type = getTreasureType(i);
@@ -641,6 +735,15 @@ export default function TreasureHunt() {
           <Text style={styles.progressText}>
             {foundCount} de {TOTAL_TREASURES} tesoros encontrados
           </Text>
+
+          {/* Timer for Hard mode */}
+          {difficulty === 'dificil' && isTimerActive && (
+            <View style={styles.timerRow}>
+              <Text style={[styles.timerText, timeLeft <= 30 && { color: '#F44336' }]}>
+                ⏱️ {Math.floor(timeLeft / 60)}:{(timeLeft % 60).toString().padStart(2, '0')}
+              </Text>
+            </View>
+          )}
 
           {/* Status message */}
           <Text style={[styles.statusText, isCapturable && styles.statusCapturable]}>
@@ -753,7 +856,23 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '800',
     color: '#333',
+  },
+  headerTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
     marginBottom: 8,
+  },
+  difficultyBadge: {
+    paddingVertical: 2,
+    paddingHorizontal: 8,
+    borderRadius: 8,
+  },
+  difficultyBadgeText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '800',
+    textTransform: 'uppercase',
   },
   dotsRow: {
     flexDirection: 'row',
@@ -813,6 +932,23 @@ const styles = StyleSheet.create({
     color: '#666',
     textAlign: 'center',
     marginBottom: 4,
+  },
+
+  // Timer
+  timerRow: {
+    backgroundColor: '#FFF3F3',
+    paddingVertical: 6,
+    borderRadius: 12,
+    marginBottom: 8,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#FFCDD2',
+  },
+  timerText: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#333',
+    fontFamily: 'System',
   },
 
   // Status
@@ -923,5 +1059,56 @@ const styles = StyleSheet.create({
     fontSize: 22,
     fontWeight: '800',
     textAlign: 'center',
+  },
+
+  // Modal Dificultad
+  modalContainer: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  difficultyCard: {
+    backgroundColor: '#fff',
+    borderRadius: 30,
+    padding: 30,
+    width: '100%',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.3,
+    shadowRadius: 20,
+    elevation: 20,
+  },
+  modalTitle: {
+    fontSize: 24,
+    fontWeight: '800',
+    color: '#333',
+    marginBottom: 8,
+  },
+  modalSubtitle: {
+    fontSize: 16,
+    color: '#666',
+    marginBottom: 24,
+    textAlign: 'center',
+  },
+  difficultyButton: {
+    width: '100%',
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+    borderRadius: 20,
+    borderWidth: 2,
+    marginBottom: 12,
+    alignItems: 'center',
+  },
+  difficultyButtonText: {
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  difficultyDescription: {
+    fontSize: 12,
+    color: '#888',
+    marginTop: 4,
   },
 });
